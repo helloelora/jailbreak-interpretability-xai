@@ -1,5 +1,5 @@
 """
-Mistral Small 4 model loading via Unsloth (4-bit quantization).
+Mistral Small 3.1 model loading via Unsloth (4-bit quantization).
 """
 
 import torch
@@ -11,13 +11,21 @@ MAX_SEQ_LENGTH = 2048
 
 
 def load_model(model_name=MODEL_NAME, max_seq_length=MAX_SEQ_LENGTH):
-    """Load Mistral Small 4 with 4-bit quantization via Unsloth."""
-    model, tokenizer = FastLanguageModel.from_pretrained(
+    """Load Mistral Small 3.1 with 4-bit quantization via Unsloth."""
+    model, tokenizer_or_processor = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=max_seq_length,
         load_in_4bit=True,
     )
     FastLanguageModel.for_inference(model)
+
+    # Unsloth may return a PixtralProcessor (multimodal) instead of a tokenizer.
+    # Extract the underlying tokenizer for text-only use.
+    if hasattr(tokenizer_or_processor, "tokenizer"):
+        tokenizer = tokenizer_or_processor.tokenizer
+    else:
+        tokenizer = tokenizer_or_processor
+
     return model, tokenizer
 
 
