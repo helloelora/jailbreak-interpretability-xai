@@ -25,7 +25,8 @@ OUTPUT_DIR="$WORKDIR/jailbreak_xai_runs/results/fuzz_${SLURM_JOB_ID}"
 module purge
 module load apptainer/1.4.4/gcc-15.1.0
 
-mkdir -p "$OUTPUT_DIR"
+export HF_HOME="$WORKDIR/.cache/huggingface"
+mkdir -p "$HF_HOME" "$OUTPUT_DIR"
 
 echo "=== Job $SLURM_JOB_ID starting on $(hostname) ==="
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
@@ -36,6 +37,7 @@ apptainer exec \
     --nv \
     --writable-tmpfs \
     --bind "$WORKDIR:$WORKDIR:rw" \
+    --env HF_HOME="$HF_HOME" \
     --pwd "$PROJECT_DIR" \
     "$SIF_PATH" \
     python -m src.fuzzer.run \
