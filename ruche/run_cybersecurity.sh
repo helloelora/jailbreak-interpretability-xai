@@ -43,8 +43,8 @@ apptainer exec \
     python -m src.fuzzer.run \
         --output-dir "$OUTPUT_DIR" \
         --category cybersecurity \
-        --population-size 20 \
-        --generations 50 \
+        --population-size 10 \
+        --generations 10 \
         --mutation-rate 0.3 \
         --max-new-tokens 256
 
