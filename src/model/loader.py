@@ -49,12 +49,21 @@ def get_first_token_logits(model, tokenizer, prompt):
 
     Returns the full logit vector over the vocabulary for the next token
     after the prompt. This lets us measure the refusal vs. compliance signal.
+
+    Uses generate() with max_new_tokens=1 to handle the multimodal
+    Mistral3ForConditionalGeneration architecture correctly.
     """
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
-        outputs = model(**inputs)
-    # Logits at the last prompt position = distribution over first generated token
-    return outputs.logits[0, -1, :]
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=1,
+            do_sample=False,
+            return_dict_in_generate=True,
+            output_scores=True,
+        )
+    # scores[0] = logits for the first generated token (before softmax)
+    return outputs.scores[0][0]
 
 
 def format_chat(tokenizer, user_message, system_message=None):
