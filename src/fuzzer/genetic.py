@@ -257,11 +257,15 @@ class PromptFuzzer:
         else:
             score = logit_score
 
+        response_tokens = self.tokenizer.encode(response, add_special_tokens=False)
+
         return {
             "score": score,
             "logit_score": logit_score,
             "refusal_prob": refusal_prob,
             "response": response,
+            "response_len_tokens": len(response_tokens),
+            "response_truncated": len(response_tokens) >= self.max_new_tokens,
             "jailbroken": jailbroken,
             "is_refusal": is_refusal,
         }
