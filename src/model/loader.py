@@ -1,5 +1,9 @@
 """
 Mistral Small 3.1 model loading via Unsloth (4-bit quantization).
+
+Mistral Small 3.1 is a multimodal model (Mistral3ForConditionalGeneration).
+For text-only jailbreak analysis, we extract the underlying language model
+(model.language_model) which is a standard MistralForCausalLM.
 """
 
 import torch
@@ -11,16 +15,25 @@ MAX_SEQ_LENGTH = 2048
 
 
 def load_model(model_name=MODEL_NAME, max_seq_length=MAX_SEQ_LENGTH):
-    """Load Mistral Small 3.1 with 4-bit quantization via Unsloth."""
-    model, tokenizer_or_processor = FastLanguageModel.from_pretrained(
+    """Load Mistral Small 3.1 with 4-bit quantization via Unsloth.
+
+    Returns the inner language model (MistralForCausalLM) and tokenizer,
+    bypassing the multimodal wrapper.
+    """
+    full_model, tokenizer_or_processor = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=max_seq_length,
         load_in_4bit=True,
     )
-    FastLanguageModel.for_inference(model)
+    FastLanguageModel.for_inference(full_model)
 
-    # Unsloth may return a PixtralProcessor (multimodal) instead of a tokenizer.
-    # Extract the underlying tokenizer for text-only use.
+    # Extract the text-only language model from the multimodal wrapper
+    if hasattr(full_model, "language_model"):
+        model = full_model.language_model
+    else:
+        model = full_model
+
+    # Extract the tokenizer from the processor if needed
     if hasattr(tokenizer_or_processor, "tokenizer"):
         tokenizer = tokenizer_or_processor.tokenizer
     else:
@@ -49,21 +62,11 @@ def get_first_token_logits(model, tokenizer, prompt):
 
     Returns the full logit vector over the vocabulary for the next token
     after the prompt. This lets us measure the refusal vs. compliance signal.
-
-    Uses generate() with max_new_tokens=1 to handle the multimodal
-    Mistral3ForConditionalGeneration architecture correctly.
     """
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=1,
-            do_sample=False,
-            return_dict_in_generate=True,
-            output_scores=True,
-        )
-    # scores[0] = logits for the first generated token (before softmax)
-    return outputs.scores[0][0]
+        outputs = model(**inputs)
+    return outputs.logits[0, -1, :]
 
 
 def format_chat(tokenizer, user_message, system_message=None):
