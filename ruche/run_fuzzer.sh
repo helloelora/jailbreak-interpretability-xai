@@ -43,7 +43,6 @@ apptainer exec \
         --population-size 20 \
         --generations 50 \
         --mutation-rate 0.3 \
-        --max-new-tokens 256 \
-        --device cuda
+        --max-new-tokens 256
 
 echo "=== Job $SLURM_JOB_ID finished ==="

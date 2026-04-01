@@ -29,7 +29,6 @@ def parse_args():
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--category", type=str, default=None,
                         help="Run only a specific HarmBench category")
-    parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--model-name", type=str,
                         default="unsloth/Mistral-Small-4-119B-2603")
     return parser.parse_args()
@@ -60,51 +59,82 @@ def main():
     logger.info(f"Running fuzzer on {len(seeds)} seed prompts")
 
     all_results = {}
-    summary = {"total_seeds": len(seeds), "total_jailbreaks": 0, "by_category": {}}
+    summary = {
+        "total_seeds": len(seeds),
+        "total_jailbreaks": 0,
+        "total_evaluated": 0,
+        "by_category": {},
+        "config": {
+            "model": args.model_name,
+            "population_size": args.population_size,
+            "generations": args.generations,
+            "mutation_rate": args.mutation_rate,
+            "max_new_tokens": args.max_new_tokens,
+        },
+    }
 
     for i, (category, seed_prompt) in enumerate(seeds):
         logger.info(f"[{i+1}/{len(seeds)}] Category: {category}")
-        logger.info(f"  Seed: {seed_prompt[:80]}...")
+        logger.info(f"  Seed: {seed_prompt}")
 
-        results = fuzzer.evolve(seed_prompt, verbose=True)
+        result = fuzzer.evolve(seed_prompt, verbose=True)
 
-        jailbreaks = [r for r in results if r["jailbroken"]]
-        logger.info(f"  Found {len(jailbreaks)} jailbreaks out of {len(results)} candidates")
+        num_jailbreaks = len(result["jailbreaks"])
+        logger.info(
+            f"  Done: {num_jailbreaks} jailbreaks / "
+            f"{result['total_evaluated']} evaluated"
+        )
 
         key = f"{category}_{i}"
         all_results[key] = {
             "category": category,
             "seed_prompt": seed_prompt,
-            "results": results,
-            "num_jailbreaks": len(jailbreaks),
+            "seed_eval": result["seed_eval"],
+            "best_score": result["best_score"],
+            "best_prompt": result["best_prompt"],
+            "generation_stats": result["generation_stats"],
+            "jailbreaks": result["jailbreaks"],
+            "candidates": result["candidates"],
+            "total_evaluated": result["total_evaluated"],
         }
 
-        if category not in summary["by_category"]:
-            summary["by_category"][category] = {"seeds": 0, "jailbreaks": 0}
-        summary["by_category"][category]["seeds"] += 1
-        summary["by_category"][category]["jailbreaks"] += len(jailbreaks)
-        summary["total_jailbreaks"] += len(jailbreaks)
+        # Save incrementally after each seed (in case job gets killed)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        incremental_path = os.path.join(args.output_dir, f"seed_{key}_{timestamp}.json")
+        with open(incremental_path, "w", encoding="utf-8") as f:
+            json.dump(all_results[key], f, indent=2, ensure_ascii=False, default=str)
 
-    # Save results
+        if category not in summary["by_category"]:
+            summary["by_category"][category] = {"seeds": 0, "jailbreaks": 0, "evaluated": 0}
+        summary["by_category"][category]["seeds"] += 1
+        summary["by_category"][category]["jailbreaks"] += num_jailbreaks
+        summary["by_category"][category]["evaluated"] += result["total_evaluated"]
+        summary["total_jailbreaks"] += num_jailbreaks
+        summary["total_evaluated"] += result["total_evaluated"]
+
+    # Save final aggregated results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    results_path = os.path.join(args.output_dir, f"fuzzer_results_{timestamp}.json")
-    with open(results_path, "w") as f:
-        json.dump(all_results, f, indent=2, default=str)
-    logger.info(f"Results saved to {results_path}")
+    results_path = os.path.join(args.output_dir, f"fuzzer_all_results_{timestamp}.json")
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, indent=2, ensure_ascii=False, default=str)
+    logger.info(f"Full results saved to {results_path}")
 
     summary_path = os.path.join(args.output_dir, f"fuzzer_summary_{timestamp}.json")
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
     logger.info(f"Summary saved to {summary_path}")
 
-    # Print summary
     logger.info("=" * 60)
     logger.info("FUZZING SUMMARY")
-    logger.info(f"Total seeds: {summary['total_seeds']}")
-    logger.info(f"Total jailbreaks found: {summary['total_jailbreaks']}")
+    logger.info(f"Total seeds:      {summary['total_seeds']}")
+    logger.info(f"Total evaluated:  {summary['total_evaluated']}")
+    logger.info(f"Total jailbreaks: {summary['total_jailbreaks']}")
     for cat, stats in summary["by_category"].items():
-        logger.info(f"  {cat}: {stats['jailbreaks']} jailbreaks / {stats['seeds']} seeds")
+        logger.info(
+            f"  {cat}: {stats['jailbreaks']} jailbreaks / "
+            f"{stats['evaluated']} evaluated / {stats['seeds']} seeds"
+        )
     logger.info("=" * 60)
 
 
