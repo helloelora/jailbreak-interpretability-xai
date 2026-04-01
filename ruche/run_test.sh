@@ -38,6 +38,7 @@ apptainer exec \
     --writable-tmpfs \
     --bind "$WORKDIR:$WORKDIR:rw" \
     --env HF_HOME="$HF_HOME" \
+    --env TORCHDYNAMO_DISABLE=1 \
     --pwd "$PROJECT_DIR" \
     "$SIF_PATH" \
     python -m src.fuzzer.run \
