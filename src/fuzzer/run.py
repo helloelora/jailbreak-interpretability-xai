@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--category", type=str, default=None,
                         help="Run only a specific HarmBench category")
     parser.add_argument("--model-name", type=str,
-                        default="unsloth/Mistral-Small-4-119B-2603")
+                        default="unsloth/Mistral-Small-3.1-24B-Instruct-2503-unsloth-bnb-4bit")
     return parser.parse_args()
 
 

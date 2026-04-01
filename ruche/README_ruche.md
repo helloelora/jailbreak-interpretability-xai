@@ -47,6 +47,6 @@ scp -r drouilheel@ruche.mesocentre.universite-paris-saclay.fr:$WORKDIR/jailbreak
 
 ## GPU partition
 
-- **gpua100**: NVIDIA A100, 80GB VRAM — needed for 4-bit Mistral Small 4 (~35-40GB)
+- **gpua100**: NVIDIA A100, 40GB VRAM — Mistral Small 3.1 24B in 4-bit (~14GB)
 - Max wall time: ~24h
 - 8 CPUs × 12GB RAM = 96GB system RAM

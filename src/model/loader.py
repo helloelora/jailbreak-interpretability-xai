@@ -6,7 +6,7 @@ import torch
 from unsloth import FastLanguageModel
 
 
-MODEL_NAME = "unsloth/Mistral-Small-4-119B-2603"
+MODEL_NAME = "unsloth/Mistral-Small-3.1-24B-Instruct-2503-unsloth-bnb-4bit"
 MAX_SEQ_LENGTH = 2048
 
 

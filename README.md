@@ -7,7 +7,7 @@
 
 This project investigates **why** safety guardrails in unified reasoning models fail under adversarial jailbreak prompts. Rather than treating jailbreaks as black-box failures, we provide a mechanistic explanation of the compliance flip — the internal transition from refusal to obedience.
 
-**Target model:** Mistral Small 4 (119B MoE, 6.5B active parameters) loaded via [Unsloth](https://github.com/unslothai/unsloth) in 4-bit quantization.
+**Target model:** Mistral Small 3.1 (24B dense) loaded via [Unsloth](https://github.com/unslothai/unsloth) in 4-bit quantization.
 
 ## Pipeline
 
