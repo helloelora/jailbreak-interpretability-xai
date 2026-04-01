@@ -1,0 +1,32 @@
+# Model loading
+unsloth
+torch
+transformers
+accelerate
+bitsandbytes
+
+# Adversarial generation
+numpy
+
+# Feature attribution
+captum
+
+# Internal tracing
+transformer-lens
+einops
+fancy-einsum
+
+# Datasets
+datasets
+huggingface-hub
+
+# Evaluation
+scipy
+scikit-learn
+
+# Notebooks & visualization
+jupyter
+matplotlib
+seaborn
+pandas
+tqdm

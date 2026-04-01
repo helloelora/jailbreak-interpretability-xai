@@ -1,0 +1,30 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+
+%post
+    pip install --no-cache-dir \
+        unsloth \
+        transformers \
+        accelerate \
+        bitsandbytes \
+        captum \
+        transformer-lens \
+        einops \
+        fancy-einsum \
+        datasets \
+        huggingface-hub \
+        scipy \
+        scikit-learn \
+        numpy \
+        pandas \
+        matplotlib \
+        seaborn \
+        tqdm \
+        nltk
+
+    # Download NLTK data for synonym-based mutations
+    python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('punkt_tab')"
+
+%labels
+    Author elora
+    Description Jailbreak interpretability on Mistral Small 4
