@@ -24,6 +24,9 @@ huggingface-hub
 scipy
 scikit-learn
 
+# Jailbreak validation (HarmBench classifier)
+# cais/HarmBench-Llama-2-13b-cls loaded via transformers
+
 # Notebooks & visualization
 jupyter
 matplotlib

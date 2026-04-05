@@ -18,6 +18,9 @@ This builds the Apptainer container (~15-20 min).
 ```bash
 # Run the prompt fuzzer
 sbatch ruche/run_fuzzer.sh
+
+# Re-annotate results with HarmBench classifier
+sbatch ruche/run_reannotate.sh $WORKDIR/jailbreak_xai_runs/results/fuzz_<JOB_ID>
 ```
 
 ## Monitor
