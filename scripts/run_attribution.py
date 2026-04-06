@@ -18,7 +18,6 @@ import os
 import sys
 
 import torch
-from transformers import AutoProcessor, Mistral3ForConditionalGeneration, MistralForCausalLM, BitsAndBytesConfig
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -35,61 +34,45 @@ MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
 def format_chat(tokenizer, user_message):
-    """Format a prompt using the Mistral chat template.
-
-    Falls back to a hardcoded Mistral 3.1 template if the tokenizer
-    doesn't have a chat_template attribute set.
-    """
+    """Format a prompt using the model's chat template."""
     messages = [{"role": "user", "content": user_message}]
-    try:
-        return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
-        )
-    except (ValueError, AttributeError):
-        # Hardcoded Mistral 3.1 template (matches the official chat_template.json)
-        bos = getattr(tokenizer, "bos_token", "<s>")
-        return f"{bos}[INST]{user_message}[/INST]"
-
-
-def load_model_float16(model_name=MODEL_NAME):
-    """Load model in float16 with auto device map (GPU + CPU offload).
-
-    Mistral Small 3.1 is multimodal (Mistral3ForConditionalGeneration).
-    We load the full model then extract the inner language model, same
-    approach as in src/model/loader.py but without Unsloth/4-bit.
-    """
-    logger.info(f"Loading model in float16: {model_name}")
-
-    # Load in 8-bit quantization: fits in ~24GB VRAM (vs ~48GB float16)
-    # 8-bit supports gradient computation (unlike 4-bit), needed for IG
-    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-
-    full_model = Mistral3ForConditionalGeneration.from_pretrained(
-        model_name,
-        quantization_config=quantization_config,
-        device_map="auto",
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
     )
+
+
+def load_model_for_ig(model_name="unsloth/Mistral-Small-3.1-24B-Instruct-2503-unsloth-bnb-4bit"):
+    """Load model via Unsloth in 4-bit (same as fuzzer).
+
+    Gradients flow through BitsAndBytes 4-bit layers during dequantization
+    (same principle as QLoRA). We only need gradients on the embedding layer
+    for Integrated Gradients, not on the weights themselves.
+    """
+    from unsloth import FastLanguageModel
+
+    logger.info(f"Loading model via Unsloth: {model_name}")
+
+    full_model, tokenizer_or_processor = FastLanguageModel.from_pretrained(
+        model_name=model_name,
+        max_seq_length=2048,
+        load_in_4bit=True,
+    )
+    # Do NOT call for_inference() — it disables gradient computation
     full_model.eval()
 
-    # Reconstruct MistralForCausalLM from the multimodal wrapper.
-    # Mistral3 splits the causal LM:
-    #   full_model.model.language_model = MistralModel (embed_tokens, layers, norm)
-    #   full_model.lm_head = nn.Linear (separate)
-    text_config = full_model.config.text_config
-    model = MistralForCausalLM(text_config)
-    model.model = full_model.model.language_model
-    model.lm_head = full_model.lm_head
-    model.eval()
-    logger.info(f"Reconstructed language model: {type(model).__name__}")
-
-    # Load processor (has the chat template) and extract tokenizer
-    processor = AutoProcessor.from_pretrained(model_name)
-    if hasattr(processor, "tokenizer"):
-        tokenizer = processor.tokenizer
+    # Extract the text-only language model
+    if hasattr(full_model, "language_model"):
+        model = full_model.language_model
     else:
-        tokenizer = processor
+        model = full_model
 
-    logger.info("Model loaded in float16")
+    # Extract the tokenizer
+    if hasattr(tokenizer_or_processor, "tokenizer"):
+        tokenizer = tokenizer_or_processor.tokenizer
+    else:
+        tokenizer = tokenizer_or_processor
+
+    logger.info(f"Model loaded: {type(model).__name__}, ~14GB VRAM")
     return model, tokenizer
 
 
@@ -114,8 +97,8 @@ def main():
         args.output_dir = os.path.join(args.input_dir, "attributions")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Load model in float16
-    model, tokenizer = load_model_float16(args.model_name)
+    # Load model (4-bit via Unsloth, same as fuzzer)
+    model, tokenizer = load_model_for_ig()
 
     # Find seed files
     seed_files = sorted(

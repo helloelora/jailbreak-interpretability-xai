@@ -76,8 +76,12 @@ def compute_attribution(model, tokenizer, prompt, n_steps=50):
     refusal_ids = _get_refusal_token_ids(tokenizer)
 
     # Get the embedding layer and its device
-    # With device_map="auto", model.device may not exist — use the embedding's device
-    embedding_layer = model.model.embed_tokens
+    # MistralForCausalLM: model.model.embed_tokens
+    # MistralModel: model.embed_tokens
+    if hasattr(model, "model") and hasattr(model.model, "embed_tokens"):
+        embedding_layer = model.model.embed_tokens
+    else:
+        embedding_layer = model.embed_tokens
     embed_device = embedding_layer.weight.device
 
     inputs = tokenizer(prompt, return_tensors="pt").to(embed_device)
