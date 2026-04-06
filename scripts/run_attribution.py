@@ -35,11 +35,20 @@ MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
 def format_chat(tokenizer, user_message):
-    """Format a prompt using the model's chat template."""
+    """Format a prompt using the Mistral chat template.
+
+    Falls back to a hardcoded Mistral 3.1 template if the tokenizer
+    doesn't have a chat_template attribute set.
+    """
     messages = [{"role": "user", "content": user_message}]
-    return tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True,
-    )
+    try:
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    except (ValueError, AttributeError):
+        # Hardcoded Mistral 3.1 template (matches the official chat_template.json)
+        bos = getattr(tokenizer, "bos_token", "<s>")
+        return f"{bos}[INST]{user_message}[/INST]"
 
 
 def load_model_float16(model_name=MODEL_NAME):
