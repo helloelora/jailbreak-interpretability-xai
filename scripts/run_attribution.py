@@ -18,7 +18,7 @@ import os
 import sys
 
 import torch
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModel, AutoProcessor, Mistral3ForConditionalGeneration
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -60,20 +60,21 @@ def load_model_float16(model_name=MODEL_NAME):
     """
     logger.info(f"Loading model in float16: {model_name}")
 
-    # Load the full multimodal model
-    full_model = AutoModel.from_pretrained(
+    # Load the full multimodal model using the correct class
+    # AutoModel drops lm_head, so we use Mistral3ForConditionalGeneration directly
+    full_model = Mistral3ForConditionalGeneration.from_pretrained(
         model_name,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         device_map="auto",
-        trust_remote_code=True,
     )
     full_model.eval()
 
-    # Extract the text-only language model
-    if hasattr(full_model, "language_model"):
-        model = full_model.language_model
-    else:
-        model = full_model
+    # Extract the text-only language model (MistralForCausalLM)
+    # Structure: full_model.language_model = MistralForCausalLM
+    #   -> language_model.model = MistralModel (embed_tokens, layers, norm)
+    #   -> language_model.lm_head = Linear
+    model = full_model.language_model
+    logger.info(f"Extracted language model: {type(model).__name__}")
 
     # Load processor (has the chat template) and extract tokenizer
     processor = AutoProcessor.from_pretrained(model_name)

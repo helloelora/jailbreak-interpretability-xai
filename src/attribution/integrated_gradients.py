@@ -75,11 +75,14 @@ def compute_attribution(model, tokenizer, prompt, n_steps=50):
     """
     refusal_ids = _get_refusal_token_ids(tokenizer)
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    # Get the embedding layer and its device
+    # With device_map="auto", model.device may not exist — use the embedding's device
+    embedding_layer = model.model.embed_tokens
+    embed_device = embedding_layer.weight.device
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(embed_device)
     input_ids = inputs["input_ids"]  # (1, seq_len)
 
-    # Get the embedding layer
-    embedding_layer = model.model.embed_tokens
     input_embeds = embedding_layer(input_ids).detach()  # (1, seq_len, hidden_dim)
 
     # Baseline: zero embedding (neutral input)
