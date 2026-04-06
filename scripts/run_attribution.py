@@ -33,6 +33,44 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
+class CausalLMWrapper:
+    """Wraps Mistral3ForConditionalGeneration to act like MistralForCausalLM.
+
+    Mistral3 splits the language model and lm_head across different levels.
+    This wrapper provides a unified interface for IG computation.
+    """
+
+    def __init__(self, full_model):
+        self.full_model = full_model
+        # Expose model.embed_tokens for IG
+        self.model = full_model.model.language_model
+        self.lm_head = full_model.lm_head
+        self.device = full_model.device
+
+    def __call__(self, inputs_embeds=None, attention_mask=None, **kwargs):
+        outputs = self.model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            **kwargs,
+        )
+        hidden = outputs[0]
+        logits = self.lm_head(hidden)
+
+        class Result:
+            pass
+
+        result = Result()
+        result.logits = logits
+        return result
+
+    def zero_grad(self):
+        self.full_model.zero_grad()
+
+    def eval(self):
+        self.full_model.eval()
+        return self
+
+
 def format_chat(tokenizer, user_message):
     """Format a prompt using the model's chat template."""
     messages = [{"role": "user", "content": user_message}]
@@ -60,8 +98,13 @@ def load_model_for_ig(model_name="unsloth/Mistral-Small-3.1-24B-Instruct-2503-un
     # Do NOT call for_inference() — it disables gradient computation
     full_model.eval()
 
-    # Extract the text-only language model
-    if hasattr(full_model, "language_model"):
+    # Extract the text-only language model from the multimodal wrapper
+    # Mistral3ForConditionalGeneration structure:
+    #   full_model.model.language_model = MistralModel (embed_tokens, layers, norm)
+    #   full_model.lm_head = nn.Linear
+    if hasattr(full_model, "model") and hasattr(full_model.model, "language_model"):
+        model = CausalLMWrapper(full_model)
+    elif hasattr(full_model, "language_model"):
         model = full_model.language_model
     else:
         model = full_model
