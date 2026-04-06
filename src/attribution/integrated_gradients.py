@@ -88,8 +88,8 @@ def compute_attribution(model, tokenizer, prompt, n_steps=50):
     # Baseline: zero embedding (neutral input)
     baseline_embeds = torch.zeros_like(input_embeds)
 
-    # Collect gradients along the interpolation path
-    scaled_grads = []
+    # Accumulate gradients along the interpolation path (memory-efficient)
+    accumulated_grads = torch.zeros_like(input_embeds)
 
     for step in range(n_steps + 1):
         alpha = step / n_steps
@@ -108,11 +108,11 @@ def compute_attribution(model, tokenizer, prompt, n_steps=50):
         model.zero_grad()
         target.backward()
 
-        grad = interp_embeds.grad.detach()  # (1, seq_len, hidden_dim)
-        scaled_grads.append(grad)
+        # Accumulate instead of storing all gradients
+        accumulated_grads += interp_embeds.grad.detach()
 
     # Integrated Gradients: mean of gradients × (input - baseline)
-    avg_grads = torch.stack(scaled_grads).mean(dim=0)  # (1, seq_len, hidden_dim)
+    avg_grads = accumulated_grads / (n_steps + 1)
     diff = input_embeds - baseline_embeds  # (1, seq_len, hidden_dim)
     ig = avg_grads * diff  # (1, seq_len, hidden_dim)
 

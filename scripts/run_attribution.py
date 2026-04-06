@@ -18,7 +18,7 @@ import os
 import sys
 
 import torch
-from transformers import AutoProcessor, Mistral3ForConditionalGeneration, MistralForCausalLM
+from transformers import AutoProcessor, Mistral3ForConditionalGeneration, MistralForCausalLM, BitsAndBytesConfig
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -60,10 +60,13 @@ def load_model_float16(model_name=MODEL_NAME):
     """
     logger.info(f"Loading model in float16: {model_name}")
 
-    # Load the full multimodal model
+    # Load in 8-bit quantization: fits in ~24GB VRAM (vs ~48GB float16)
+    # 8-bit supports gradient computation (unlike 4-bit), needed for IG
+    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
     full_model = Mistral3ForConditionalGeneration.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
+        quantization_config=quantization_config,
         device_map="auto",
     )
     full_model.eval()
