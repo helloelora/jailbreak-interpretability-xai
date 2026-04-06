@@ -8,7 +8,7 @@
 #SBATCH --mem-per-cpu=12G
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpua100
-#SBATCH --time=12:00:00
+#SBATCH --time=20:00:00
 #SBATCH --export=NONE
 #SBATCH --propagate=NONE
 
