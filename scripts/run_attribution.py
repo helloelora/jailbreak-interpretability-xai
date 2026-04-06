@@ -18,7 +18,7 @@ import os
 import sys
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -36,15 +36,32 @@ MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
 def load_model_float16(model_name=MODEL_NAME):
-    """Load model in float16 with auto device map (GPU + CPU offload)."""
+    """Load model in float16 with auto device map (GPU + CPU offload).
+
+    Mistral Small 3.1 is multimodal (Mistral3ForConditionalGeneration).
+    We load the full model then extract the inner language model, same
+    approach as in src/model/loader.py but without Unsloth/4-bit.
+    """
     logger.info(f"Loading model in float16: {model_name}")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
+
+    # Load the full multimodal model
+    full_model = AutoModel.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         device_map="auto",
+        trust_remote_code=True,
     )
-    model.eval()
+    full_model.eval()
+
+    # Extract the text-only language model
+    if hasattr(full_model, "language_model"):
+        model = full_model.language_model
+    else:
+        model = full_model
+
+    # Extract tokenizer (may come as a processor)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
     logger.info("Model loaded in float16")
     return model, tokenizer
 
