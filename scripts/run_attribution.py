@@ -18,12 +18,11 @@ import os
 import sys
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModel
+from transformers import AutoModel, AutoProcessor
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.attribution.integrated_gradients import compute_attribution, compare_attributions
-from src.model.loader import format_chat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +32,14 @@ logger = logging.getLogger(__name__)
 
 # Same model but loaded in float16 for gradient computation
 MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+
+
+def format_chat(tokenizer, user_message):
+    """Format a prompt using the model's chat template."""
+    messages = [{"role": "user", "content": user_message}]
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
+    )
 
 
 def load_model_float16(model_name=MODEL_NAME):
@@ -59,8 +66,12 @@ def load_model_float16(model_name=MODEL_NAME):
     else:
         model = full_model
 
-    # Extract tokenizer (may come as a processor)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # Load processor (has the chat template) and extract tokenizer
+    processor = AutoProcessor.from_pretrained(model_name)
+    if hasattr(processor, "tokenizer"):
+        tokenizer = processor.tokenizer
+    else:
+        tokenizer = processor
 
     logger.info("Model loaded in float16")
     return model, tokenizer
