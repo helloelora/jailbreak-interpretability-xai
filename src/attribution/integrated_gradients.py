@@ -121,7 +121,8 @@ def compute_attribution(model, tokenizer, prompt, n_steps=50):
     ig = avg_grads * diff  # (1, seq_len, hidden_dim)
 
     # Reduce to per-token attribution by summing over the hidden dimension
-    attributions = ig.sum(dim=-1).squeeze(0).cpu().numpy()  # (seq_len,)
+    # Convert to float32 first — numpy doesn't support bfloat16
+    attributions = ig.sum(dim=-1).squeeze(0).float().cpu().numpy()  # (seq_len,)
 
     # Get the actual refusal probability for this prompt
     with torch.no_grad():
