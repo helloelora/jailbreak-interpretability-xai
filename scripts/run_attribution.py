@@ -18,6 +18,8 @@ import os
 import sys
 
 import torch
+import torch.nn as nn
+from transformers.modeling_outputs import CausalLMOutput
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -33,42 +35,33 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
-class CausalLMWrapper:
-    """Wraps Mistral3ForConditionalGeneration to act like MistralForCausalLM.
-
-    Mistral3 splits the language model and lm_head across different levels.
-    This wrapper provides a unified interface for IG computation.
-    """
+class CausalLMWrapper(nn.Module):
+    """Wrap Mistral3 as a standard nn.Module for IG and tracing utilities."""
 
     def __init__(self, full_model):
-        self.full_model = full_model
-        # Expose model.embed_tokens for IG
+        super().__init__()
         self.model = full_model.model.language_model
         self.lm_head = full_model.lm_head
-        self.device = full_model.device
 
-    def __call__(self, inputs_embeds=None, attention_mask=None, **kwargs):
+    @property
+    def device(self):
+        return self.lm_head.weight.device
+
+    def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None, **kwargs):
         outputs = self.model(
+            input_ids=input_ids,
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             **kwargs,
         )
         hidden = outputs[0]
         logits = self.lm_head(hidden)
+        return CausalLMOutput(logits=logits)
 
-        class Result:
-            pass
-
-        result = Result()
-        result.logits = logits
-        return result
-
-    def zero_grad(self):
-        self.full_model.zero_grad()
-
-    def eval(self):
-        self.full_model.eval()
-        return self
+    def get_input_embeddings(self):
+        if hasattr(self.model, "get_input_embeddings"):
+            return self.model.get_input_embeddings()
+        return self.model.embed_tokens
 
 
 def format_chat(tokenizer, user_message):

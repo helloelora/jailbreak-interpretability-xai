@@ -28,7 +28,9 @@ import sys
 from datetime import datetime
 
 import torch
+import torch.nn as nn
 from unsloth import FastLanguageModel
+from transformers.modeling_outputs import CausalLMOutput
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -48,59 +50,46 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "unsloth/Mistral-Small-3.1-24B-Instruct-2503-unsloth-bnb-4bit"
 
 
-class CausalLMWrapper:
-    """Unifies Mistral3ForConditionalGeneration to a CausalLM-like interface.
+class CausalLMWrapper(nn.Module):
+    """Wrap Mistral3 as a nn.Module exposing a standard CausalLM interface.
 
-    Mistral3 splits: full_model.model.language_model (MistralModel) + full_model.lm_head.
+    nnsight expects a real torch.nn.Module with a ``forward`` method.
+    Registering ``model`` and ``lm_head`` as child modules also lets the
+    tracing helpers walk the module tree normally.
     """
 
     def __init__(self, full_model):
-        self.full_model = full_model
+        super().__init__()
+
         if hasattr(full_model, "model") and hasattr(full_model.model, "language_model"):
-            self.inner_model = full_model.model.language_model
-            self.inner_lm_head = full_model.lm_head
+            self.model = full_model.model.language_model
+            self.lm_head = full_model.lm_head
         else:
-            self.inner_model = full_model.model if hasattr(full_model, "model") else full_model
-            self.inner_lm_head = getattr(full_model, "lm_head", None)
+            self.model = full_model.model if hasattr(full_model, "model") else full_model
+            self.lm_head = getattr(full_model, "lm_head", None)
 
-    @property
-    def model(self):
-        return self.inner_model
-
-    @property
-    def lm_head(self):
-        return self.inner_lm_head
+        if self.lm_head is None:
+            raise AttributeError("CausalLMWrapper requires an lm_head on the wrapped model")
 
     @property
     def device(self):
-        return self.full_model.device
+        return self.lm_head.weight.device
 
-    def __call__(self, input_ids=None, inputs_embeds=None, attention_mask=None, **kwargs):
-        outputs = self.inner_model(
+    def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None, **kwargs):
+        outputs = self.model(
             input_ids=input_ids,
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             **kwargs,
         )
         hidden = outputs[0]
-        logits = self.inner_lm_head(hidden)
-
-        class Result:
-            pass
-
-        result = Result()
-        result.logits = logits
-        return result
+        logits = self.lm_head(hidden)
+        return CausalLMOutput(logits=logits)
 
     def get_input_embeddings(self):
-        return self.inner_model.embed_tokens
-
-    def zero_grad(self):
-        self.full_model.zero_grad()
-
-    def eval(self):
-        self.full_model.eval()
-        return self
+        if hasattr(self.model, "get_input_embeddings"):
+            return self.model.get_input_embeddings()
+        return self.model.embed_tokens
 
 
 def load_model():
@@ -113,7 +102,7 @@ def load_model():
     full_model.eval()
 
     # Wrap for uniform CausalLM interface
-    if type(full_model).__name__ == "Mistral3ForConditionalGeneration":
+    if hasattr(full_model, "model") and hasattr(full_model.model, "language_model"):
         model = CausalLMWrapper(full_model)
     elif hasattr(full_model, "language_model"):
         model = full_model.language_model

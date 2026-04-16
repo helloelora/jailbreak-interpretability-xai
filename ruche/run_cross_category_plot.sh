@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=4G
-#SBATCH --partition=cpu_short
+#SBATCH --partition=gpua100
 #SBATCH --time=00:30:00
 #SBATCH --export=NONE
 #SBATCH --propagate=NONE
