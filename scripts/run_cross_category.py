@@ -301,20 +301,24 @@ def main():
             except Exception as e:
                 logger.error(f"Failed on {fname}: {e}", exc_info=True)
 
-    # Aggregate
+    # Per-job summary (unique filename so parallel jobs don't clash).
+    # plot_cross_category.py loads individual analysis_*.json files directly
+    # so this is just for bookkeeping.
     summary = {
         "timestamp": datetime.now().isoformat(),
         "model": MODEL_NAME,
         "n_analyses": len(all_results),
         "categories": sorted(set(r["category"] for r in all_results)),
+        "harmbench_dirs": args.harmbench_dirs,
         "analyses": all_results,
     }
-    summary_path = os.path.join(args.output_dir, "cross_category_summary.json")
+    job_id = os.environ.get("SLURM_JOB_ID", "local")
+    summary_path = os.path.join(args.output_dir, f"run_summary_{job_id}.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False, default=str)
 
     logger.info(f"Done. {len(all_results)} analyses saved to {args.output_dir}/")
-    logger.info(f"Summary: {summary_path}")
+    logger.info(f"Per-job summary: {summary_path}")
 
 
 if __name__ == "__main__":

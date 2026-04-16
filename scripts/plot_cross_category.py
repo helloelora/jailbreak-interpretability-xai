@@ -40,9 +40,17 @@ def parse_args():
 
 
 def load_summary(input_dir):
-    path = os.path.join(input_dir, "cross_category_summary.json")
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    """Load all per-seed analysis_*.json files (robust to parallel-job output).
+
+    If cross_category_summary.json exists and covers all files, use it;
+    otherwise reconstruct from individual analysis_*.json files.
+    """
+    analyses = []
+    for fname in sorted(os.listdir(input_dir)):
+        if fname.startswith("analysis_") and fname.endswith(".json"):
+            with open(os.path.join(input_dir, fname), encoding="utf-8") as f:
+                analyses.append(json.load(f))
+    return {"analyses": analyses}
 
 
 def group_by_category(analyses):
