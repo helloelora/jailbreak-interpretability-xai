@@ -151,8 +151,13 @@ def mutate_keep_style(fuzzer, prompt, target_style, seen_prompts):
         n_mut = random.choices([1, 2], weights=[0.75, 0.25])[0]
         for _ in range(n_mut):
             fn = random.choice(mutation_fns)
-            mutated, name = fn(mutated)
-            applied.append(name)
+            try:
+                mutated, name = fn(mutated)
+                applied.append(name)
+            except LookupError:
+                # NLTK WordNet is not always available on Ruche. Skip this
+                # mutation rather than failing the whole targeted completion job.
+                continue
         norm = normalize_prompt(mutated)
         if norm in seen_prompts:
             continue
