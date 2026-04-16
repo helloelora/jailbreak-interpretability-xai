@@ -8,6 +8,7 @@ From: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
         accelerate \
         bitsandbytes \
         captum \
+        nnsight \
         transformer-lens \
         einops \
         fancy-einsum \

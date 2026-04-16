@@ -22,11 +22,20 @@ SIF_PATH="$WORKDIR/$SIF_NAME"
 RESULTS_BASE="$WORKDIR/jailbreak_xai_runs/results"
 
 # --- Directories to re-annotate ---
-DIRS=(
-    "$RESULTS_BASE/cyber_467665"
-    "$RESULTS_BASE/malware_467668"
-    "$RESULTS_BASE/fuzz_505235"
-)
+# Pass directories as positional args to override auto-discovery:
+#   sbatch ruche/run_reannotate_all.sh "$WORKDIR/.../cyber_123" "$WORKDIR/.../malware_456"
+if [ "$#" -gt 0 ]; then
+    DIRS=("$@")
+else
+    DIRS=()
+    for pattern in cyber_* malware_* illegal_* chembio_* fuzz_*; do
+        for dir in "$RESULTS_BASE"/$pattern; do
+            if [ -d "$dir" ]; then
+                DIRS+=("$dir")
+            fi
+        done
+    done
+fi
 
 # --- Environment ---
 module purge
@@ -37,6 +46,16 @@ mkdir -p "$HF_HOME"
 
 echo "=== Job $SLURM_JOB_ID starting on $(hostname) ==="
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'N/A')"
+
+if [ "${#DIRS[@]}" -eq 0 ]; then
+    echo "No run directories found under $RESULTS_BASE"
+    exit 1
+fi
+
+echo "Run directories to re-annotate:"
+for dir in "${DIRS[@]}"; do
+    echo "  - $dir"
+done
 
 for INPUT_DIR in "${DIRS[@]}"; do
     echo ""

@@ -15,6 +15,7 @@ captum
 transformer-lens
 einops
 fancy-einsum
+nnsight
 
 # Datasets
 datasets

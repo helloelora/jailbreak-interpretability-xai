@@ -1,191 +1,140 @@
 """
-Integrated Gradients attribution for analyzing compliance flip.
+Integrated Gradients attribution via Captum's LayerIntegratedGradients.
 
-Computes token-level attribution scores that measure how each input token
-contributes to the model's decision to refuse or comply. Uses the logit gap
-between refusal tokens and compliance tokens as the target function.
+Hooks into the embedding layer to compute gradients of the compliance score
+with respect to the token embeddings. Works on BitsAndBytes 4-bit models via
+straight-through gradient estimation (values are approximate but directionally
+correct).
 
-Requires the model to be loaded in float16 (not 4-bit) for gradient computation.
-
-Reference: Sundararajan et al. (2017) "Axiomatic Attribution for Deep Networks"
+Reference: Sundararajan et al. (2017) "Axiomatic Attribution for Deep Networks".
 """
 
-import logging
-
 import torch
-import numpy as np
-
-logger = logging.getLogger(__name__)
-
-# Refusal prefixes — same as in the fuzzer, used to identify refusal token IDs
-REFUSAL_PREFIXES = [
-    "I cannot", "I can't", "I'm sorry", "Sorry", "I apologize",
-    "I'm not able", "I must decline", "I won't", "As an AI",
-    "I'm unable", "It is not appropriate", "I don't think",
-]
+from captum.attr import LayerIntegratedGradients
 
 
-def _get_refusal_token_ids(tokenizer):
-    """Get the set of token IDs that correspond to refusal starts."""
-    refusal_ids = set()
-    for prefix in REFUSAL_PREFIXES:
-        tokens = tokenizer.encode(prefix, add_special_tokens=False)
-        if tokens:
-            refusal_ids.add(tokens[0])
-    return refusal_ids
+def _make_forward_fn(model, comply_ids, refuse_ids):
+    """Forward function: input_ids -> compliance score (comply - refuse logit gap)."""
+
+    def forward_fn(input_ids):
+        outputs = model(input_ids=input_ids)
+        logits = outputs.logits[0, -1, :]
+        comply_logit = logits[comply_ids].mean()
+        refuse_logit = logits[refuse_ids].mean()
+        return (comply_logit - refuse_logit).unsqueeze(0)
+
+    return forward_fn
 
 
-def _refusal_logit_gap(logits, refusal_ids):
-    """Compute the logit gap: refusal_logit - compliance_logit.
+def _find_user_span(tokenizer, raw_prompt, formatted_input_ids):
+    """Find [start, end) token range where raw_prompt appears in chat-formatted IDs.
 
-    A positive value means the model leans toward refusal.
-    A negative value means the model leans toward compliance.
-
-    Args:
-        logits: shape (vocab_size,) — logits for the next token
-        refusal_ids: set of token IDs considered refusal tokens
-
-    Returns:
-        Scalar tensor (refusal_mass - compliance_mass in probability space)
+    Chat templates wrap user content in boilerplate (BOS, system prompt,
+    [INST]/[/INST]). For visualization we want to isolate the user span.
     """
-    probs = torch.softmax(logits, dim=0)
-    refusal_prob = sum(probs[tid] for tid in refusal_ids)
-    return refusal_prob
+    if raw_prompt is None:
+        return None
+    formatted_ids = formatted_input_ids[0].tolist()
+
+    for variant in [raw_prompt, " " + raw_prompt, "\n" + raw_prompt]:
+        raw_ids = tokenizer.encode(variant, add_special_tokens=False)
+        n = len(raw_ids)
+        if n == 0:
+            continue
+        for i in range(len(formatted_ids) - n + 1):
+            if formatted_ids[i:i + n] == raw_ids:
+                return (i, i + n)
+
+    # Fuzzy: longest suffix of raw_ids that appears in formatted
+    raw_ids = tokenizer.encode(raw_prompt, add_special_tokens=False)
+    for trim in range(1, min(4, len(raw_ids))):
+        sub = raw_ids[trim:]
+        n = len(sub)
+        for i in range(len(formatted_ids) - n + 1):
+            if formatted_ids[i:i + n] == sub:
+                return (i, i + n)
+
+    return None
 
 
-def compute_attribution(model, tokenizer, prompt, n_steps=50):
-    """Compute Integrated Gradients attribution for each input token.
-
-    Measures how each token contributes to the refusal probability.
-    Positive attribution = token pushes toward refusal.
-    Negative attribution = token pushes toward compliance.
+def compute_attribution(model, tokenizer, prompt, comply_ids, refuse_ids,
+                        n_steps=50, raw_prompt=None):
+    """Compute token-level IG attribution for a prompt.
 
     Args:
-        model: Language model loaded in float16 (requires gradient support).
-        tokenizer: The model's tokenizer.
-        prompt: Input prompt string (already formatted with chat template).
-        n_steps: Number of interpolation steps (default 50).
+        model: Language model.
+        tokenizer: Tokenizer.
+        prompt: Chat-formatted prompt string.
+        comply_ids, refuse_ids: Compliance/refusal token ID tensors.
+        n_steps: IG interpolation steps (default 50).
+        raw_prompt: Original user content before chat formatting.
+            Used to locate the user-content span for visualization.
 
     Returns:
         dict with:
             - tokens: list of token strings
-            - token_ids: list of token IDs
-            - attributions: numpy array of attribution scores per token
-            - refusal_prob: float, the refusal probability for this prompt
+            - attributions: tensor of per-token IG scores (L1 normalized)
+            - compliance_score: scalar comply - refuse score
+            - user_span: (start, end) tuple into tokens, or None
     """
-    refusal_ids = _get_refusal_token_ids(tokenizer)
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_ids = inputs["input_ids"]
 
-    # Get the embedding layer and its device
-    # MistralForCausalLM: model.model.embed_tokens
-    # MistralModel: model.embed_tokens
-    if hasattr(model, "model") and hasattr(model.model, "embed_tokens"):
-        embedding_layer = model.model.embed_tokens
-    else:
-        embedding_layer = model.embed_tokens
-    embed_device = embedding_layer.weight.device
+    comply_ids = comply_ids.to(model.device)
+    refuse_ids = refuse_ids.to(model.device)
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(embed_device)
-    input_ids = inputs["input_ids"]  # (1, seq_len)
+    embedding_layer = model.get_input_embeddings()
+    forward_fn = _make_forward_fn(model, comply_ids, refuse_ids)
 
-    input_embeds = embedding_layer(input_ids).detach()  # (1, seq_len, hidden_dim)
+    lig = LayerIntegratedGradients(forward_fn, embedding_layer)
+    attributions = lig.attribute(
+        inputs=input_ids,
+        baselines=None,
+        n_steps=n_steps,
+        internal_batch_size=1,
+    )
 
-    # Baseline: zero embedding (neutral input)
-    baseline_embeds = torch.zeros_like(input_embeds)
+    # Sum over embedding dim, normalize by L1
+    attr = attributions.sum(dim=-1).squeeze(0).float()
+    attr = attr / (attr.abs().sum() + 1e-10)
 
-    # Accumulate gradients along the interpolation path (memory-efficient)
-    accumulated_grads = torch.zeros_like(input_embeds)
+    tokens = [tokenizer.decode([tid]) for tid in input_ids[0]]
+    user_span = _find_user_span(tokenizer, raw_prompt, input_ids.cpu())
 
-    for step in range(n_steps + 1):
-        alpha = step / n_steps
-        # Interpolated embedding between baseline and actual input
-        interp_embeds = baseline_embeds + alpha * (input_embeds - baseline_embeds)
-        interp_embeds = interp_embeds.detach().requires_grad_(True)
-
-        # Forward pass using embeddings directly (bypass the embedding lookup)
-        outputs = model(inputs_embeds=interp_embeds, attention_mask=inputs["attention_mask"])
-        logits = outputs.logits[0, -1, :]  # next-token logits
-
-        # Target: refusal probability
-        target = _refusal_logit_gap(logits, refusal_ids)
-
-        # Backward pass to get gradient w.r.t. interpolated embeddings
-        model.zero_grad()
-        target.backward()
-
-        # Accumulate instead of storing all gradients
-        accumulated_grads += interp_embeds.grad.detach()
-
-    # Integrated Gradients: mean of gradients × (input - baseline)
-    avg_grads = accumulated_grads / (n_steps + 1)
-    diff = input_embeds - baseline_embeds  # (1, seq_len, hidden_dim)
-    ig = avg_grads * diff  # (1, seq_len, hidden_dim)
-
-    # Reduce to per-token attribution by summing over the hidden dimension
-    # Convert to float32 first — numpy doesn't support bfloat16
-    attributions = ig.sum(dim=-1).squeeze(0).float().cpu().numpy()  # (seq_len,)
-
-    # Get the actual refusal probability for this prompt
     with torch.no_grad():
-        outputs = model(inputs_embeds=input_embeds, attention_mask=inputs["attention_mask"])
-        logits = outputs.logits[0, -1, :]
-        refusal_prob = _refusal_logit_gap(logits, refusal_ids).item()
-
-    # Decode tokens for readability
-    token_ids = input_ids.squeeze(0).tolist()
-    tokens = [tokenizer.decode([tid]) for tid in token_ids]
+        score = forward_fn(input_ids).item()
 
     return {
         "tokens": tokens,
-        "token_ids": token_ids,
-        "attributions": attributions,
-        "refusal_prob": refusal_prob,
+        "attributions": attr.detach().cpu(),
+        "compliance_score": score,
+        "user_span": user_span,
     }
 
 
-def compare_attributions(attr_refused, attr_jailbroken):
-    """Compare attributions between a refused prompt and a jailbroken one.
+def compare_attributions(attr_clean, attr_jailbreak, k=10):
+    """Summary comparison between clean and jailbreak attributions.
 
-    Identifies tokens in the jailbroken prompt that have the largest
-    negative attribution shift (tokens that suppress refusal).
-
-    Args:
-        attr_refused: Output of compute_attribution for the refused prompt.
-        attr_jailbroken: Output of compute_attribution for the jailbroken prompt.
-
-    Returns:
-        dict with:
-            - refused: {tokens, attributions, refusal_prob}
-            - jailbroken: {tokens, attributions, refusal_prob}
-            - refusal_prob_shift: how much the refusal probability changed
-            - top_refusal_tokens: tokens with highest refusal attribution in refused prompt
-            - top_comply_tokens: tokens with most negative attribution in jailbroken prompt
+    Prompts have different tokenizations so we report top-k tokens per prompt
+    rather than token-aligned diffs.
     """
-    # Top tokens pushing toward refusal in the refused prompt
-    ref_indices = np.argsort(attr_refused["attributions"])[::-1]
-    top_refusal = [
-        (attr_refused["tokens"][i], float(attr_refused["attributions"][i]))
-        for i in ref_indices[:10]
-    ]
-
-    # Top tokens pushing toward compliance in the jailbroken prompt
-    jb_indices = np.argsort(attr_jailbroken["attributions"])
-    top_comply = [
-        (attr_jailbroken["tokens"][i], float(attr_jailbroken["attributions"][i]))
-        for i in jb_indices[:10]
-    ]
+    def top_tokens(attr_dict):
+        scores = attr_dict["attributions"]
+        tokens = attr_dict["tokens"]
+        span = attr_dict.get("user_span")
+        if span is not None:
+            start, end = span
+            scores = scores[start:end]
+            tokens = tokens[start:end]
+        if len(scores) == 0:
+            return []
+        top_idx = scores.abs().topk(min(k, len(scores))).indices
+        return [(tokens[i], scores[i].item()) for i in top_idx]
 
     return {
-        "refused": {
-            "tokens": attr_refused["tokens"],
-            "attributions": attr_refused["attributions"].tolist(),
-            "refusal_prob": attr_refused["refusal_prob"],
-        },
-        "jailbroken": {
-            "tokens": attr_jailbroken["tokens"],
-            "attributions": attr_jailbroken["attributions"].tolist(),
-            "refusal_prob": attr_jailbroken["refusal_prob"],
-        },
-        "refusal_prob_shift": attr_refused["refusal_prob"] - attr_jailbroken["refusal_prob"],
-        "top_refusal_tokens": top_refusal,
-        "top_comply_tokens": top_comply,
+        "clean_compliance_score": attr_clean["compliance_score"],
+        "jailbreak_compliance_score": attr_jailbreak["compliance_score"],
+        "score_shift": attr_jailbreak["compliance_score"] - attr_clean["compliance_score"],
+        "clean_top_tokens": top_tokens(attr_clean),
+        "jailbreak_top_tokens": top_tokens(attr_jailbreak),
     }

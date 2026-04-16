@@ -33,11 +33,42 @@ echo "=== Job $SLURM_JOB_ID starting on $(hostname) ==="
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'N/A')"
 echo "Output: $OUTPUT_DIR"
 
-# Run IG attribution on each category's harmbench-validated results
+# Run IG attribution on supplied directories, or auto-discover re-annotated runs.
+# Pass either run dirs or harmbench_validated dirs:
+#   sbatch ruche/run_attribution.sh "$WORKDIR/.../cyber_123"
+#   sbatch ruche/run_attribution.sh "$WORKDIR/.../cyber_123/harmbench_validated"
+if [ "$#" -gt 0 ]; then
+    DIRS=()
+    for arg in "$@"; do
+        if [ -d "$arg/harmbench_validated" ]; then
+            DIRS+=("$arg/harmbench_validated")
+        else
+            DIRS+=("$arg")
+        fi
+    done
+else
+    DIRS=()
+    for pattern in cyber_* malware_* illegal_* chembio_* fuzz_*; do
+        for dir in "$RESULTS_BASE"/$pattern/harmbench_validated; do
+            if [ -d "$dir" ]; then
+                DIRS+=("$dir")
+            fi
+        done
+    done
+fi
+
+if [ "${#DIRS[@]}" -eq 0 ]; then
+    echo "No harmbench_validated directories found under $RESULTS_BASE"
+    exit 1
+fi
+
+echo "Input directories:"
+for dir in "${DIRS[@]}"; do
+    echo "  - $dir"
+done
+
 # float16 Mistral 24B (~48GB) uses device_map=auto to split GPU+CPU
-for DIR in "$RESULTS_BASE/malware_467668/harmbench_validated" \
-           "$RESULTS_BASE/cyber_467665/harmbench_validated" \
-           "$RESULTS_BASE/fuzz_505235/harmbench_validated"; do
+for DIR in "${DIRS[@]}"; do
     if [ -d "$DIR" ]; then
         echo ""
         echo "=== Attribution: $DIR ==="
