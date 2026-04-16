@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=xai-plot
+#SBATCH --job-name=xai-run6
 #SBATCH --output=%x.o%j
 #SBATCH --error=%x.e%j
 #SBATCH --nodes=1
@@ -14,9 +14,10 @@
 
 set -euo pipefail
 
-# Generate cross-category plots and report from shared output dir.
-# Usage: sbatch --export=ALL,OUT_DIR=<shared_output_dir> ruche/run_cross_category_plot.sh
-
+if [ -z "${INPUT_DIR:-}" ]; then
+    echo "ERROR: INPUT_DIR env var not set"
+    exit 1
+fi
 if [ -z "${OUT_DIR:-}" ]; then
     echo "ERROR: OUT_DIR env var not set"
     exit 1
@@ -30,15 +31,18 @@ SIF_PATH="$WORKDIR/$SIF_NAME"
 module purge
 module load apptainer/1.4.4/gcc-15.1.0
 
-echo "=== Plot job $SLURM_JOB_ID on $(hostname) ==="
+echo "=== Run 6 job $SLURM_JOB_ID on $(hostname) ==="
+echo "Input dir: $INPUT_DIR"
 echo "Output dir: $OUT_DIR"
-ls -la "$OUT_DIR" | head
 
 apptainer exec \
     --writable-tmpfs \
     --bind "$WORKDIR:$WORKDIR:rw" \
     --pwd "$PROJECT_DIR" \
     "$SIF_PATH" \
-    python -m scripts.plot_cross_category "$OUT_DIR" --top-k 5
+    python -m scripts.run_style_matched_subset \
+        --input-dir "$INPUT_DIR" \
+        --output-dir "$OUT_DIR" \
+        --styles research override
 
-echo "=== Figures: $OUT_DIR/figures/ ==="
+echo "=== Run 6 finished ==="
