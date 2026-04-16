@@ -277,3 +277,120 @@ def get_compliance_token_ids(tokenizer):
             refuse_ids.append(ids[0])
 
     return torch.tensor(comply_ids), torch.tensor(refuse_ids)
+
+
+def _score_from_logits(logits, comply_ids, refuse_ids):
+    """Return scalar compliance score and probability masses from next-token logits."""
+    probs = F.softmax(logits.float(), dim=-1)
+    comply_prob = probs[comply_ids].sum().item()
+    refuse_prob = probs[refuse_ids].sum().item()
+    score = logits[comply_ids].mean().item() - logits[refuse_ids].mean().item()
+    top_token_id = int(probs.argmax().item())
+    top_token_prob = float(probs[top_token_id].item())
+
+    return {
+        "score": score,
+        "comply_prob": comply_prob,
+        "refuse_prob": refuse_prob,
+        "top_token_id": top_token_id,
+        "top_token_prob": top_token_prob,
+    }
+
+
+def score_prompt(model, tokenizer, prompt, comply_ids, refuse_ids):
+    """Score the next-token refusal/compliance tendency for a prompt."""
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    comply_ids = comply_ids.to(model.device)
+    refuse_ids = refuse_ids.to(model.device)
+
+    with torch.no_grad():
+        logits = model(**inputs).logits[0, -1, :]
+
+    result = _score_from_logits(logits, comply_ids, refuse_ids)
+    result["top_token"] = tokenizer.decode([result["top_token_id"]])
+    return result
+
+
+def cache_last_token_activations(model, tokenizer, prompt, layer_indices=None):
+    """Cache last-token hidden states for selected layers on a given prompt."""
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_ids = inputs["input_ids"]
+    info = get_model_info(model)
+    n_layers = info["n_layers"]
+
+    if layer_indices is None:
+        layer_indices = list(range(n_layers))
+    else:
+        layer_indices = sorted(set(int(i) for i in layer_indices))
+
+    wrapped = NNsight(model)
+    saved = {}
+    with torch.no_grad():
+        with wrapped.trace(input_ids):
+            for i in layer_indices:
+                saved[i] = _wrapped_layer(wrapped, i, info).output[0].save()
+
+    cached = {}
+    for i, tensor in saved.items():
+        cached[i] = _last_token(tensor).detach().to(model.device).clone()
+    return cached
+
+
+def intervene_on_prompt(
+    model,
+    tokenizer,
+    prompt,
+    comply_ids,
+    refuse_ids,
+    zero_layers=None,
+    replace_layers=None,
+):
+    """Apply last-token layer interventions and score the resulting next token.
+
+    Args:
+        model: Language model.
+        tokenizer: Model tokenizer.
+        prompt: Chat-formatted prompt string.
+        comply_ids, refuse_ids: Token ID tensors.
+        zero_layers: Iterable of layer indices to zero at the last token.
+        replace_layers: Dict[layer_idx -> hidden_state_tensor] used to overwrite
+            the last-token hidden state at selected layers.
+
+    Returns:
+        dict with score / probability masses / top-token info.
+    """
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_ids = inputs["input_ids"]
+    info = get_model_info(model)
+    lm_head_path = info["lm_head_path"]
+    if lm_head_path is None:
+        raise RuntimeError("intervene_on_prompt needs lm_head")
+
+    comply_ids = comply_ids.to(model.device)
+    refuse_ids = refuse_ids.to(model.device)
+    zero_layers = set(int(i) for i in (zero_layers or []))
+    replace_layers = {
+        int(i): hidden.to(model.device) for i, hidden in (replace_layers or {}).items()
+    }
+    zero_layers -= set(replace_layers.keys())
+
+    wrapped = NNsight(model)
+    with torch.no_grad():
+        with wrapped.trace(input_ids):
+            for layer_idx in sorted(zero_layers):
+                layer = _wrapped_layer(wrapped, layer_idx, info)
+                layer.output[0][-1, :] = 0
+
+            for layer_idx, hidden in sorted(replace_layers.items()):
+                layer = _wrapped_layer(wrapped, layer_idx, info)
+                layer.output[0][-1, :] = hidden
+
+            lm_head_proxy = _traverse(wrapped, lm_head_path).lm_head
+            patched_logits = lm_head_proxy.output.save()
+
+    logits = _last_token(patched_logits)
+    result = _score_from_logits(logits, comply_ids, refuse_ids)
+    result["top_token"] = tokenizer.decode([result["top_token_id"]])
+    result["zero_layers"] = sorted(zero_layers)
+    result["replace_layers"] = sorted(replace_layers.keys())
+    return result
