@@ -1,0 +1,18 @@
+{
+  "styles": [
+    "research",
+    "override",
+    "technical_spec"
+  ],
+  "counts_per_style": {
+    "research": 2,
+    "override": 1,
+    "technical_spec": 2
+  },
+  "n_selected_total": 15,
+  "categories": [
+    "cybersecurity",
+    "illegal",
+    "malware"
+  ]
+}
