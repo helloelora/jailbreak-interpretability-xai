@@ -29,11 +29,44 @@ Thumbs.db
 *.gguf
 models/
 
-# Results (track selectively)
+# SLURM logs
+*.e[0-9]*
+*.o[0-9]*
+jailbreak-*.e*
+jailbreak-*.o*
 results/*.log
 
 # Environment
 .env
 
-# Project proposal
-PP_AliDor_EloraDrouilhet.pdf
+# Writing artefacts (tracked in Overleaf, not here)
+overleaf/
+overleaf_figures/
+pics/
+Template_for_ICLR_2025_Conference_Submission/
+presentation.tex
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+
+# PDFs (proposal, slides exports, course handouts)
+*.pdf
+
+# Raw experiment outputs (only curated bundles under results/shared_* are tracked)
+results/Cyber_harmbench/
+results/Malware_harmbench/
+results/Illegal_harmbench/
+results/Expanded/
+results/Run[ _]*/
+results/run6_style_matched_*/
+results/stylefill_*/
+results/fuzzer_*.json
+results/seed_*.json
+results/jailbreak-*.e*
+results/jailbreak-*.o*
