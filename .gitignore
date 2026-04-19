@@ -55,8 +55,9 @@ pics/
 *.synctex.gz
 *.toc
 
-# PDFs (proposals, slides exports, course handouts)
+# PDFs (proposals, slides exports, course handouts) — except the final report
 *.pdf
+!report/Report_EloraDrouilhet_AliDor.pdf
 
 # The full ICLR template folder — sources live in report/ instead
 Template_for_ICLR_2025_Conference_Submission/
