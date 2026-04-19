@@ -39,12 +39,12 @@ results/*.log
 # Environment
 .env
 
-# Writing artefacts (tracked in Overleaf, not here)
+# Overleaf mirror and local figure exports (figures/ is the canonical copy)
 overleaf/
 overleaf_figures/
 pics/
-Template_for_ICLR_2025_Conference_Submission/
-presentation.tex
+
+# LaTeX compiled artefacts
 *.aux
 *.bbl
 *.blg
@@ -55,8 +55,14 @@ presentation.tex
 *.synctex.gz
 *.toc
 
-# PDFs (proposal, slides exports, course handouts)
+# PDFs (proposals, slides exports, course handouts)
 *.pdf
+
+# The full ICLR template folder — sources live in report/ instead
+Template_for_ICLR_2025_Conference_Submission/
+
+# Root-level copy of slides source (canonical version is slides/presentation.tex)
+/presentation.tex
 
 # Raw experiment outputs (only curated bundles under results/shared_* are tracked)
 results/Cyber_harmbench/
