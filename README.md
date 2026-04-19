@@ -170,7 +170,7 @@ python scripts/run_internal_defense.py
 python scripts/plot_internal_defense.py
 ```
 
-For HPC execution, see [`ruche/README_ruche.md`](ruche/README_ruche.md).
+All experiments were run on the CentraleSupélec HPC cluster La Ruche (NVIDIA A100 40 GB).
 
 ## References
 
